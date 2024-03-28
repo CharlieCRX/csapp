@@ -252,7 +252,7 @@ int isLessOrEqual(int x, int y) {
   int diff_sign = x_sign_bit & !y_sign_bit;
 
   // Only one of same_sign and diff_sign is true to return true
-  return same_sign | !diff_sign;
+  return same_sign | diff_sign;
 }
 //4
 /* 
