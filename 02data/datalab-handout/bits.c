@@ -180,7 +180,9 @@ int isTmax(int x) {
  *   Rating: 2
  */
 int allOddBits(int x) {
-  return 2;
+	int mask = 0xAA + (0xAA << 8);
+	mask = mask + (mask << 16);
+	return !((mask & x) ^ mask);
 }
 /* 
  * negate - return -x 
@@ -190,7 +192,7 @@ int allOddBits(int x) {
  *   Rating: 2
  */
 int negate(int x) {
-  return 2;
+  return ~x + 1;
 }
 //3
 /* 
@@ -203,7 +205,12 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-  return 2;
+	int high_byte_validation = !!((x >> 4) ^ 0x3);
+	int low_byte = x & 0xf;
+	int lb_vali1 = !!(low_byte >> 3);
+	int lb_vali2 = !!(low_byte ^ 0x8);
+	int lb_vali3 = !!(low_byte ^ 0x9);
+	return !(high_byte_validation + (lb_vali1 & lb_vali2 & lb_vali3));
 }
 /* 
  * conditional - same as x ? y : z 
@@ -213,7 +220,9 @@ int isAsciiDigit(int x) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-  return 2;
+	x = !!x;
+	x = ~x + 1;
+	return (x & y) | (~x & z);
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
