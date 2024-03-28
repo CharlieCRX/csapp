@@ -232,7 +232,27 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+  // Get the sign bit of x
+  // 1 = Negative
+  // 0 = Non-Negative
+  int x_sign_bit = x >> 31;
+
+  //Get the sign bit of y
+  // 1 = Negative
+  // 0 = Non-Negative
+  int y_sign_bit = y >> 31;
+
+  // True if signs are the same and (x-y <= 0)
+  // x-y <= 0 ----> y-x >= 0 :This conversion makes it easier to determine the sign bit
+  // If signs are the same: x_sign_bit ^ y_sign_bit == 0
+  // If y-x >= 0 : sign_bit_of(y + (~x + 1)) == 0
+  int same_sign = !(x_sign_bit ^ y_sign_bit) & !((y + (~x + 1)) >> 31);
+
+  // True if the signs are not the same and x<0&&y>0
+  int diff_sign = x_sign_bit & !y_sign_bit;
+
+  // Only one of same_sign and diff_sign is true to return true
+  return same_sign | !diff_sign;
 }
 //4
 /* 
