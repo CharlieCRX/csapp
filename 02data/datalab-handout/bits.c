@@ -264,7 +264,24 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+	/*problem:
+			x == 0 return 1
+			x != 0 return 0
+
+		base case:
+			If x==0, then the sign bits of x and -x are both 0.
+			If x!=0, then the sign bits of x and -x are different
+	*/
+	int neg_x = ~x + 1;
+
+	//0 = x and neg_x are both 0
+	//1 = x is not 0
+	int sign_flag = ((neg_x | x) >> 31) & 0x1;
+
+	//sign_flag == 0, return -1 + 2 = 1
+	//sign_flag == 1, return -2 + 2 = 0
+	return (~sign_flag + 2);
+
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
