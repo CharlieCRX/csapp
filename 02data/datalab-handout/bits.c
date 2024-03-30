@@ -296,7 +296,52 @@ int logicalNeg(int x) {
  *  Rating: 4
  */
 int howManyBits(int x) {
-  return 0;
+	/*
+		If x is a positive number, then the index where the highest bit is 1 is added by 1.
+		Example: 
+			0x37 --> [0011 0111]
+			The index where highest bit is 1 is 6,and the minium number of bits is 6 + 1;
+
+		If x is a negative number, then the minimum number of bits to represent the number 
+		is the index of the highest bit 0 plus one,derived from the sign bit
+		Example:
+			0xC7 --> [1100 0111]
+			The index where highest bit is 0 is 6,and the minium number of bits is 6 + 1;
+
+		Observe the NOT operation on negative numbers:
+			~(0xC7) = ~[1100 0111] = [0011 1000]
+										^             ^
+		Result:After the NOT operation of negative numbers,
+						the highest bit of the positive number is obtained as 1, 
+						which is equivalent to obtaining the highest bit of the negative number as 0.
+	*/
+	// sign_mask:
+	//	[1111 .. 1111]: x is negative
+	//	[0000 .. 0000]: x is positive
+	int sign_mask = x >> 31;
+	
+	// x : (x & [11..11]) | (~x & 0) = x | 0 = x
+	//~x : (x & 0 ) | (~x & [11..11]) = 0 | ~x = ~x
+	x = (x & (~sign_mask)) | ((~x) & sign_mask);
+
+	//Get the highest bit of 1
+	int bit_16 = (!!(x >> 16)) << 4;
+	x = x >> bit_16;
+
+	int bit_8 = (!!(x >> 8)) << 3;
+	x = x >> bit_8;
+
+	int bit_4 = !!(x >> 4) << 2;
+	x = x >> bit_4;
+
+	int bit_2 = !!(x >> 2) << 1;
+	x = x >> bit_2;
+
+	int bit_1 = !!(x >> 1);
+	x = x >> bit_1;
+
+	int bit_0 = x;
+	return bit_16 + bit_8 + bit_4 + bit_2 + bit_1 + bit_0 + 1;
 }
 //float
 /* 
@@ -311,7 +356,27 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-  return 2;
+	unsigned    s = uf >> 31;
+	unsigned  exp = uf >> 23 & 0xFF;
+	unsigned frac = uf & 0x7FFFFF;
+
+	//Denormalized:f = (-1)^S * 2^E * M (hint: (-1)^S and 2^E are both constant) 
+	// f = M * CONSTANT
+	//2f = 2M * CONSTANT = M << 1 * CONSTANT
+	if(exp == 0){
+		frac = frac << 1;
+	}
+	//Infinity:return original value
+	else if(exp == 0xFF){
+		return uf;
+	}
+	//Normalized:f = (-1)^S * 2^E * M
+	//          2f = (-1)^S * 2^(E+1) * M
+	else{
+		exp = exp + 1;
+	}
+	return (s<<31) | (exp<< 23) | frac;
+
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -326,7 +391,26 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-  return 2;
+	unsigned s = uf >> 31;
+	unsigned exp = uf >> 23 & 0xFF;
+	unsigned frac = uf & 0x7FFFFF;
+
+	//E = exp - Bias
+	int E = exp - 127;
+	frac = frac | (1 << 23);
+
+	if(E < 0) return 0;
+	else if(E >= 31) return 0x1 << 31;
+	else {
+		if(E<23){
+			frac = frac >> (23 - E);
+		}else{
+			frac = frac << (E - 23);
+		}
+	}
+	if (s)
+		return ~frac + 1;
+	return frac;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
