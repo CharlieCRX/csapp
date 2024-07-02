@@ -445,6 +445,10 @@ stack:
 
 ```
 
+> **调用者和被调用者寄存器**
+>
+> 函数P（caller）在调用函数Q（callee）的时候，Q函数会在运算之前，将P函数可能会用到的寄存器存放到栈中（`%rbx`），然后再去使用这个寄存器进行计算。这个Q函数为了P函数保存的寄存器，就是被调用者寄存器。
+
 :three:**将源链表数据复制到新链表中，并且返回异或源链表所有元素的结果**
 
 ```C
@@ -502,5 +506,62 @@ copy_block:
 	.cfi_def_cfa 7, 8
 	ret
 	.cfi_endproc
+```
+
+这里注意，被复制的块和目的块均为**数组**。
+
+对应的Y86格式代码`copy.ys`为:
+
+```assembly
+# Execution begins at address 0 
+	.pos 0 
+	irmovq stack, %rsp  	# Set up stack pointer  
+	call main		# Execute main program
+	halt			# Terminate program 
+
+
+
+# Source block
+.align 8
+src:
+	.quad 0x00a
+	.quad 0x0b0
+	.quad 0xc00
+# Destination block
+dest:
+	.quad 0x111
+	.quad 0x222
+	.quad 0x333
+
+main:	irmovq src,%rdi	
+	irmovq dest,%rsi
+	irmovq $3, %rdx
+	call copy_block			# copy_block(src, dest, 3)
+	ret	
+	
+copy_block:	
+	xorq %rax, %rax			# Set return value to 0
+	andq %rdx, %rdx			# Set Condition codes
+	irmovq $8, %r8			# Constant 8
+	irmovq $1, %r9          # Constant 1
+	jmp test				# Goto test
+
+loop:
+	mrmovq (%rdi), %r10		# Set val to *src
+	addq %r8,%rdi			# src++
+	rmmovq %r10, (%rsi)		# Set *dest = val
+	addq %r8, %rsi			# dest++
+	xorq %r10, %rax			# result ^= val
+	subq %r9, %rdx			# len--
+
+test:
+	jg loop				# Stop when len <= 0
+	ret
+
+
+	
+# The stack starts here and grows to lower addresses
+	.pos 0x300		
+stack:	 
 ```
 
