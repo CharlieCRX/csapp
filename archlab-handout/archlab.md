@@ -716,7 +716,7 @@ partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`
 
   重新编译，结果ok。
 
-- 用写好的程序测试结果：现在在`y86-code/`下，有个文件`asumi.ys`，其功能是计算数组的和，并且用的求和指令为`iaddq`，最终结果是`%rax = 0xabcdabcdabcd`，`asumi.ys`源码如下
+- 用写好的模拟程序来执行含有`iaddq`指令的程序：现在在`y86-code/`下，有个文件`asumi.ys`，其功能是计算数组的和，并且用的求和指令为`iaddq`，最终结果是`%rax = 0xabcdabcdabcd`，`asumi.ys`源码如下
 
   ```assembly
   # Execution begins at address 0 
@@ -785,9 +785,9 @@ partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`
 
   可以看到`%rax`为预测的`0x0000abcdabcdabcd`，并且输出结果为`ISA Check Succeeds`，所以可以进行下一步。
 
-- 测试分数
+- 基准程序测试
 
-  因为上面的测试程序已经验证结果没问题，现在就要进行分数测试了：
+  因为上面的测试程序已经验证结果没问题，现在就要进行基准程序的测试了：
 
   ```bash
   unix> (cd ../y86-code; make testssim)
@@ -891,3 +891,127 @@ partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`
 
   测试成功，开始partC（partB总计用时：3.5h）
 
+## part C
+
+在partC中，我们的工作目录切换至`sim/pipe`。
+
+任务是修改`ncopy.ys`和`pipe-full.hcl`，从而让`ncopy.ys`跑的更快。
+
+就是贴合PIPE的实现思路，看看如何高效利用流水线来实现代码的实现速度。
+
+:one:**问题**：
+
+1. 是什么拖慢了实现速度？
+
+   答：循环和落后的相加指令。
+
+2. 如何加速执行速度？
+
+   答：一方面，csapp的5.8节对于循环问题导致的速度慢有效果；另一个对于落后的相加指令，可以让`iaddq V，rB`来直接代替常数运算。
+
+3. 如何直观查看运行速度？
+
+   答：运行脚本`benchmark.pl`
+
+**解决思路**
+
+- 实现PIPE模拟器`psim`：
+
+  修改`pipe-full.hcl`，使得支持`iaddq`，从而简化常数加寄存器的性能损失。这里修改过程与上述partB部分一致，修改完毕后，生成模拟器`psim`。
+
+  ```bash
+  make psim VERSION=full			#报错解决方案与partB一致
+  ```
+
+- 检验`psim`的正确性：
+
+  :one: 运行模拟程序`asumi.ys`
+
+  ```bash
+  ./psim -t ../y86-code/asumi.yo
+  ```
+
+  结果运行无误：
+
+  ```bash
+  48 instructions executed
+  Status = HLT
+  Condition Codes: Z=1 S=0 O=0
+  Changed Register State:
+  %rax:   0x0000000000000000      0x0000abcdabcdabcd
+  %rsp:   0x0000000000000000      0x0000000000000100
+  %rdi:   0x0000000000000000      0x0000000000000038
+  %r10:   0x0000000000000000      0x0000a000a000a000
+  Changed Memory State:
+  0x00f0: 0x0000000000000000      0x0000000000000055
+  0x00f8: 0x0000000000000000      0x0000000000000013
+  ISA Check Succeeds
+  CPI: 44 cycles/32 instructions = 1.38
+  ```
+
+  可以看出`pipe-full.hcl`修改成功。
+
+  :two: 基准程序测试
+
+  ```bash
+  (cd ../y86-code; make testpsim)
+  ```
+
+  基准测试成功
+
+  ```bash
+  crx@ubuntu:pipe$ (cd ../y86-code; make testpsim)
+  Makefile:42: warning: ignoring prerequisites on suffix rule definition
+  Makefile:45: warning: ignoring prerequisites on suffix rule definition
+  Makefile:48: warning: ignoring prerequisites on suffix rule definition
+  Makefile:51: warning: ignoring prerequisites on suffix rule definition
+  ../pipe/psim -t asum.yo > asum.pipe
+  ../pipe/psim -t asumr.yo > asumr.pipe
+  ../pipe/psim -t cjr.yo > cjr.pipe
+  ../pipe/psim -t j-cc.yo > j-cc.pipe
+  ../pipe/psim -t poptest.yo > poptest.pipe
+  ../pipe/psim -t pushquestion.yo > pushquestion.pipe
+  ../pipe/psim -t pushtest.yo > pushtest.pipe
+  ../pipe/psim -t prog1.yo > prog1.pipe
+  ../pipe/psim -t prog2.yo > prog2.pipe
+  ../pipe/psim -t prog3.yo > prog3.pipe
+  ../pipe/psim -t prog4.yo > prog4.pipe
+  ../pipe/psim -t prog5.yo > prog5.pipe
+  ../pipe/psim -t prog6.yo > prog6.pipe
+  ../pipe/psim -t prog7.yo > prog7.pipe
+  ../pipe/psim -t prog8.yo > prog8.pipe
+  ../pipe/psim -t ret-hazard.yo > ret-hazard.pipe
+  grep "ISA Check" *.pipe
+  asum.pipe:ISA Check Succeeds
+  asumr.pipe:ISA Check Succeeds
+  cjr.pipe:ISA Check Succeeds
+  j-cc.pipe:ISA Check Succeeds
+  poptest.pipe:ISA Check Succeeds
+  prog1.pipe:ISA Check Succeeds
+  prog2.pipe:ISA Check Succeeds
+  prog3.pipe:ISA Check Succeeds
+  prog4.pipe:ISA Check Succeeds
+  prog5.pipe:ISA Check Succeeds
+  prog6.pipe:ISA Check Succeeds
+  prog7.pipe:ISA Check Succeeds
+  prog8.pipe:ISA Check Succeeds
+  pushquestion.pipe:ISA Check Succeeds
+  pushtest.pipe:ISA Check Succeeds
+  ret-hazard.pipe:ISA Check Succeeds
+  rm asum.pipe asumr.pipe cjr.pipe j-cc.pipe poptest.pipe pushquestion.pipe pushtest.pipe prog1.pipe prog2.pipe prog3.pipe prog4.pipe prog5.pipe prog6.pipe prog7.pipe prog8.pipe ret-hazard.pipe
+  ```
+
+  :three:回归测试
+
+  ```bash
+  (cd ../ptest; make SIM=../pipe/psim TFLAGS=-i)
+  ```
+
+  回归测试成功
+
+  ```bash
+  Simulating with ../pipe/psim
+    All 756 ISA Checks Succeed
+  ```
+
+- 开始修改`ncopy.ys`
