@@ -565,3 +565,329 @@ test:
 stack:	 
 ```
 
+## part B
+
+这次我们要开始对SEQ（sequential Processor）进行下手了。
+
+partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`，使得处理器支持`iaddq`指令。
+
+这个指令的具体描述在课本的课后问题4.51和4.52中，现在看下具体功能是什么：
+
+> 4.51
+>
+> Practice Problem 4.3 introduced the `iaddq` instruction to add immediate data to a
+> register. Describe the computations performed to implement this instruction. Use
+> the computations for `irmovq` and `OPq` (Figure 4.18) as a guide.
+>
+> 4.52
+>
+> The file `seq-full.hcl` contains the HCL description for SEQ, along with the
+> declaration of a constant `IIADDQ` having hexadecimal value C, the instruction code
+> for `iaddq`. Modify the HCL descriptions of the control logic blocks to implement
+> the iaddq instruction, as described in Practice Problem 4.3 and Problem 4.51. See
+> the lab material for directions on how to generate a simulator for your solution
+> and how to test it.
+
+这里告诉我们的信息：
+
+- `iaddq`：the instruction to add immediate data to a
+  register
+- `seq-full.hcl` ：contains the HCL description for SEQ
+- lab material for directions： how to generate a simulator for your solution
+  and how to test it.
+
+首先写出这个`iaddq`指令在SEQ下具体每个阶段的计算过程（参考Figure 4.18）
+
+| Stage      | iadd V, rB                                                   |
+| ---------- | ------------------------------------------------------------ |
+| Fetch      | icode:ifun ← M₁[PC]<br/>rA:rB ← M₁[PC + 1]<br/>valC ← M₈[PC + 2]<br />valP ← PC + 10 |
+| Decode     | valB ← R[rB]                                                 |
+| Execute    | valE ← valB + valC<br/>Set CC                                |
+| Memory     |                                                              |
+| Write back | R[rB] ← valE                                                 |
+| PC update  | PC ← valP                                                    |
+
+这样我们就可以修改`seq-full.hcl`中对应阶段的内容了：
+
+1. 取指阶段：指令有效，需要寄存器，需要常数值
+
+   ```c
+   bool instr_valid = icode in
+       { INOP, IHALT, IRRMOVQ, IIRMOVQ, IRMMOVQ, IMRMOVQ,
+              IOPQ, IJXX, ICALL, IRET, IPUSHQ, IPOPQ, IIADDQ };
+   ```
+
+   ```C
+   bool need_regids =
+       icode in { IRRMOVQ, IOPQ, IPUSHQ, IPOPQ,
+                IIRMOVQ, IRMMOVQ, IMRMOVQ, IIADDQ };
+   ```
+
+   ```c
+   bool need_valC =
+       icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IJXX, ICALL, IIADDQ };
+   ```
+
+2. 译码和写回：从rB读取valB，并且将计算值valE写回到rB
+
+   ```c
+   word srcB = [
+       icode in { IOPQ, IRMMOVQ, IMRMOVQ, IIADDQ } : rB;
+       icode in { IPUSHQ, IPOPQ, ICALL, IRET } : RRSP;
+       1 : RNONE;  # Don't need register
+   ];
+   ```
+
+   ```C
+   word dstE = [
+       icode in { IRRMOVQ } && Cnd : rB;
+       icode in { IIRMOVQ, IOPQ, IIADDQ} : rB;
+       icode in { IPUSHQ, IPOPQ, ICALL, IRET } : RRSP;
+       1 : RNONE;  # Don't write any register
+   ];
+   ```
+
+   
+
+3. 执行：计算valB和valC的和，并且设置CC
+
+   ```c
+   word aluA = [
+       icode in { IRRMOVQ, IOPQ } : valA;
+       icode in { IIRMOVQ, IRMMOVQ, IMRMOVQ, IIADDQ } : valC;
+       icode in { ICALL, IPUSHQ } : -8;
+       icode in { IRET, IPOPQ } : 8;
+       # Other instructions don't need ALU
+   ];
+   
+   ## Select input B to ALU
+   word aluB = [
+       icode in { IRMMOVQ, IMRMOVQ, IOPQ, ICALL,
+                 IPUSHQ, IRET, IPOPQ, IIADDQ } : valB;
+       icode in { IRRMOVQ, IIRMOVQ } : 0;
+       # Other instructions don't need ALU
+   ];
+   ```
+
+   ```c
+   ## Should the condition codes be updated?
+   bool set_cc = icode in { IOPQ, IIADDQ };
+   ```
+
+修改`seq-full.hcl`文件完毕后，就需要用SEQ模拟器来测试下结果了。以下是测试步骤：
+
+- 创建模拟器：
+
+  ```bash
+  make VERSION=full
+  ```
+
+  创建时候报错：
+
+  ```bash
+  crx@ubuntu:seq$ make VERSION=full
+  # Building the seq-full.hcl version of SEQ
+  ../misc/hcl2c -n seq-full.hcl <seq-full.hcl >seq-full.c
+  gcc -Wall -O2 -isystem /usr/include/tcl8.5 -I../misc -DHAS_GUI -o ssim \
+          seq-full.c ssim.c ../misc/isa.c -L/usr/lib -ltk -ltcl -lm
+  ssim.c:20:10: fatal error: tk.h: No such file or directory
+     20 | #include <tk.h>
+        |          ^~~~~~
+  compilation terminated.
+  make: *** [Makefile:44: ssim] Error 1
+  ```
+
+  看了[前辈帖子](https://lincx-911.github.io/2021/12/architecture_lab/)的回答，解决方案如下
+
+  ```bash
+  sed -i "s/tcl8.5/tcl8.6/g" Makefile                     #将 Makefile 文件中所有出现的 tcl8.5 替换为 tcl8.6。
+  sed -i "s/CFLAGS=/CFLAGS=-DUSE_INTERP_RESULT /g" Makefile 
+  ```
+
+  然后继续make，报错：
+
+  ```bash
+  /usr/bin/ld: /tmp/ccD1lDwT.o:(.data.rel+0x0): undefined reference to `matherr'
+  collect2: error: ld returned 1 exit status
+  make: *** [Makefile:44: ssim] Error 1
+  ```
+
+  解决undefined reference to `matherr`：我们可以在`ssim.c`找到`matherr`,然后注释掉那两行，因为没有用到。
+
+  重新编译，结果ok。
+
+- 用写好的程序测试结果：现在在`y86-code/`下，有个文件`asumi.ys`，其功能是计算数组的和，并且用的求和指令为`iaddq`，最终结果是`%rax = 0xabcdabcdabcd`，`asumi.ys`源码如下
+
+  ```assembly
+  # Execution begins at address 0 
+  	.pos 0 
+  	irmovq stack, %rsp  	# Set up stack pointer  
+  	call main		# Execute main program
+  	halt			# Terminate program 
+  
+  # Array of 4 elements
+  	.align 8 	
+  array:	.quad 0x000d000d000d
+  	.quad 0x00c000c000c0
+  	.quad 0x0b000b000b00
+  	.quad 0xa000a000a000
+  
+  main:	irmovq array,%rdi	
+  	irmovq $4,%rsi
+  	call sum		# sum(array, 4)
+  	ret 
+  
+  /* $begin sumi-ys */
+  # long sum(long *start, long count)
+  # start in %rdi, count in %rsi
+  sum:
+  	xorq %rax,%rax		# sum = 0
+  	andq %rsi,%rsi		# Set condition codes
+  	jmp    test
+  loop:
+  	mrmovq (%rdi),%r10	# Get *start
+  	addq %r10,%rax          # Add to sum
+  	iaddq $8,%rdi           # start++
+  	iaddq $-1,%rsi          # count--
+  test:
+  	jne    loop             # Stop when 0
+  	ret
+  /* $end sumi-ys */
+  
+  # The stack starts here and grows to lower addresses
+  	.pos 0x100		
+  stack:	 
+  ```
+
+  这样用对应`asumi.ys`编译成`asumi.yo`后，用SEQ模拟器执行查看结果：
+
+  ```bash
+  ./ssim -t ../y86-code/asumi.yo
+  ```
+
+  执行结果：
+
+  ```bash
+  
+  32 instructions executed
+  Status = HLT
+  Condition Codes: Z=1 S=0 O=0
+  Changed Register State:
+  %rax:   0x0000000000000000      0x0000abcdabcdabcd
+  %rsp:   0x0000000000000000      0x0000000000000100
+  %rdi:   0x0000000000000000      0x0000000000000038
+  %r10:   0x0000000000000000      0x0000a000a000a000
+  Changed Memory State:
+  0x00f0: 0x0000000000000000      0x0000000000000055
+  0x00f8: 0x0000000000000000      0x0000000000000013
+  ISA Check Succeeds
+  ```
+
+  可以看到`%rax`为预测的`0x0000abcdabcdabcd`，并且输出结果为`ISA Check Succeeds`，所以可以进行下一步。
+
+- 测试分数
+
+  因为上面的测试程序已经验证结果没问题，现在就要进行分数测试了：
+
+  ```bash
+  unix> (cd ../y86-code; make testssim)
+  ```
+
+  结果：
+
+  ```bash
+  crx@ubuntu:seq$ (cd ../y86-code; make testssim)
+  Makefile:42: warning: ignoring prerequisites on suffix rule definition
+  Makefile:45: warning: ignoring prerequisites on suffix rule definition
+  Makefile:48: warning: ignoring prerequisites on suffix rule definition
+  Makefile:51: warning: ignoring prerequisites on suffix rule definition
+  ../seq/ssim -t asum.yo > asum.seq
+  ../seq/ssim -t asumr.yo > asumr.seq
+  ../seq/ssim -t cjr.yo > cjr.seq
+  ../seq/ssim -t j-cc.yo > j-cc.seq
+  ../seq/ssim -t poptest.yo > poptest.seq
+  ../seq/ssim -t pushquestion.yo > pushquestion.seq
+  ../seq/ssim -t pushtest.yo > pushtest.seq
+  ../seq/ssim -t prog1.yo > prog1.seq
+  ../seq/ssim -t prog2.yo > prog2.seq
+  ../seq/ssim -t prog3.yo > prog3.seq
+  ../seq/ssim -t prog4.yo > prog4.seq
+  ../seq/ssim -t prog5.yo > prog5.seq
+  ../seq/ssim -t prog6.yo > prog6.seq
+  ../seq/ssim -t prog7.yo > prog7.seq
+  ../seq/ssim -t prog8.yo > prog8.seq
+  ../seq/ssim -t ret-hazard.yo > ret-hazard.seq
+  grep "ISA Check" *.seq
+  asum.seq:ISA Check Succeeds
+  asumr.seq:ISA Check Succeeds
+  cjr.seq:ISA Check Succeeds
+  j-cc.seq:ISA Check Succeeds
+  poptest.seq:ISA Check Succeeds
+  prog1.seq:ISA Check Succeeds
+  prog2.seq:ISA Check Succeeds
+  prog3.seq:ISA Check Succeeds
+  prog4.seq:ISA Check Succeeds
+  prog5.seq:ISA Check Succeeds
+  prog6.seq:ISA Check Succeeds
+  prog7.seq:ISA Check Succeeds
+  prog8.seq:ISA Check Succeeds
+  pushquestion.seq:ISA Check Succeeds
+  pushtest.seq:ISA Check Succeeds
+  ret-hazard.seq:ISA Check Succeeds
+  rm asum.seq asumr.seq cjr.seq j-cc.seq poptest.seq pushquestion.seq pushtest.seq prog1.seq prog2.seq prog3.seq prog4.seq prog5.seq prog6.seq prog7.seq prog8.seq ret-hazard.seq
+  ```
+
+  可以看出所有结果均测试通过，可以进行下一步了。
+
+- 回归测试
+
+  上面步骤没问题了，可以先测下除了`iaddq`和`leave`的指令：
+
+  ```bash
+  unix> (cd ../ptest; make SIM=../seq/ssim)
+  ```
+
+  结果：
+
+  ```bash
+  crx@ubuntu:seq$ (cd ../ptest; make SIM=../seq/ssim)
+  ./optest.pl -s ../seq/ssim
+  Simulating with ../seq/ssim
+    All 49 ISA Checks Succeed
+  ./jtest.pl -s ../seq/ssim
+  Simulating with ../seq/ssim
+    All 64 ISA Checks Succeed
+  ./ctest.pl -s ../seq/ssim
+  Simulating with ../seq/ssim
+    All 22 ISA Checks Succeed
+  ./htest.pl -s ../seq/ssim
+  Simulating with ../seq/ssim
+    All 600 ISA Checks Succeed
+  ```
+
+  然后再加入`iaddq`指令的测试：
+
+  ```bash
+  (cd ../ptest; make SIM=../seq/ssim TFLAGS=-i)
+  ```
+
+  结果：
+
+  ```c
+  crx@ubuntu:seq$ (cd ../ptest; make SIM=../seq/ssim TFLAGS=-i)
+  ./optest.pl -s ../seq/ssim -i
+  Simulating with ../seq/ssim
+    All 58 ISA Checks Succeed
+  ./jtest.pl -s ../seq/ssim -i
+  Simulating with ../seq/ssim
+    All 96 ISA Checks Succeed
+  ./ctest.pl -s ../seq/ssim -i
+  Simulating with ../seq/ssim
+    All 22 ISA Checks Succeed
+  ./htest.pl -s ../seq/ssim -i
+  Simulating with ../seq/ssim
+    All 756 ISA Checks Succeed
+  ```
+
+  测试成功，开始partC（partB总计用时：3.5h）
+
