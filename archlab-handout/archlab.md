@@ -915,13 +915,13 @@ partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`
 
 **解决思路**
 
-- 实现PIPE模拟器`psim`：
+**PIPE模拟器`psim`**
 
-  修改`pipe-full.hcl`，使得支持`iaddq`，从而简化常数加寄存器的性能损失。这里修改过程与上述partB部分一致，修改完毕后，生成模拟器`psim`。
+修改`pipe-full.hcl`，，使得支持`iaddq`，从而简化常数加寄存器的性能损失。这里修改过程与上述partB部分一致，修改完毕后，生成模拟器`psim`。
 
-  ```bash
-  make psim VERSION=full			#报错解决方案与partB一致
-  ```
+```bash
+make psim VERSION=full			#报错解决方案与partB一致
+```
 
 - 检验`psim`的正确性：
 
@@ -1014,4 +1014,219 @@ partB的主要任务就是要在`sim/seq/seq-full.hcl`进行修改指令`IIADDQ`
     All 756 ISA Checks Succeed
   ```
 
-- 开始修改`ncopy.ys`
+  支持`iaddq`的模拟器ok了，下面开始优化代码。
+
+- **优化`ncopy.ys`**
+
+  优化思路：
+
+  - 将循环体中的一个计算表达式换多个表达式
+  - 多个表达式之间填充气泡
+  
+  1. [将循环体中的一个计算表达式换多个表达式](https://github.com/kcxain/CSAPP-Lab/blob/master/Notes/Lab04-Architecture_Lab.md#%E5%BE%AA%E7%8E%AF%E5%B1%95%E5%BC%80)
+  
+     ```assembly
+     	# Loop header
+     	andq %rdx,%rdx		# len <= 0?
+     	jmp test
+     Loop:
+     	mrmovq (%rdi),%r8
+     	rmmovq %r8,(%rsi)
+     	andq %r8,%r8
+     	jle Loop1
+     	iaddq $1,%rax
+     Loop1:
+     	mrmovq 8(%rdi),%r8
+     	rmmovq %r8,8(%rsi)
+     	andq %r8,%r8
+     	jle Loop2
+     	iaddq $1,%rax
+     Loop2:
+     	mrmovq 16(%rdi),%r8
+     	rmmovq %r8,16(%rsi)
+     	andq %r8,%r8
+     	jle Loop3
+     	iaddq $1,%rax
+     Loop3:
+     	mrmovq 24(%rdi),%r8
+     	rmmovq %r8,24(%rsi)
+     	andq %r8,%r8
+     	jle Loop4
+     	iaddq $1,%rax
+     Loop4:
+     	mrmovq 32(%rdi),%r8
+     	rmmovq %r8,32(%rsi)
+     	andq %r8,%r8
+     	jle Loop5
+     	iaddq $1,%rax
+     Loop5:
+     	mrmovq 40(%rdi),%r8
+     	rmmovq %r8,40(%rsi)
+     	iaddq $48,%rdi
+     	iaddq $48,%rsi
+     	andq %r8,%r8
+     	jle test
+     	iaddq $1,%rax	
+     test:
+     	iaddq $-6, %rdx			# 先减，判断够不够6个
+     	jge Loop				# 6路展开
+     	iaddq $-8,%rdi
+     	iaddq $-8,%rsi
+     	iaddq $6, %rdx
+     	jmp test2				#剩下的
+     Lore:
+     	mrmovq (%rdi),%r8
+     	rmmovq %r8,(%rsi)
+     	andq %r8,%r8
+     	jle test2
+     	iaddq $1,%rax
+     test2:
+     	iaddq $8,%rdi
+     	iaddq $8,%rsi
+     	iaddq $-1, %rdx
+     	jge Lore
+     ```
+  
+     每次循环都对6个数进行复制，每次复制就设置一个条件语句判断返回时是否加1，对于剩下的数据每次循环只对1个数进行复制。
+  
+     注意，程序多次使用了下面的操作：
+  
+     ```assembly
+     mrmovq (%rdi), %r8
+     rmmovq %r8, (%rsi)
+     ```
+  
+     `Y86-64`处理器的流水线有 F(取指)、D(译码)、E(执行)、M(访存)、W(写回) 五个阶段，D 阶段才读取寄存器，M 阶段才读取对应内存值，
+  
+     即使使用转发来避免数据冒险，这其中也至少会有一个气泡。像这样
+  
+     ```assembly
+     mrmovq (%rdi), %r8
+     bubble
+     rmmovq %r8, (%rsi)
+     ```
+  
+     一个优化办法是，多取一个寄存器，连续进行两次数据复制。
+  
+     ```assembly
+     mrmovq (%rdi), %r8
+     mrmovq 8(%rdi), %r9
+     rmmovq %r8, (%rsi)
+     rmmovq %r9, 8(%rsi)
+     ```
+  
+     像这样，对`%r8`和`%r9`进行读入和读出的操作之间都隔着一条其他指令，就不会有气泡产生了。代码如下：
+  
+     ```assembly
+     	# Loop header
+     	andq %rdx,%rdx		# len <= 0?
+     	jmp test
+     Loop:
+     	mrmovq (%rdi),%r8
+     	mrmovq 8(%rdi),%r9
+     	andq %r8,%r8
+     	rmmovq %r8,(%rsi)
+     	rmmovq %r9,8(%rsi)
+     	jle Loop1
+     	iaddq $1,%rax
+     Loop1:	
+     	andq %r9,%r9
+     	jle Loop2
+     	iaddq $1,%rax
+     Loop2:
+     	mrmovq 16(%rdi),%r8
+     	mrmovq 24(%rdi),%r9
+     	andq %r8,%r8
+     	rmmovq %r8,16(%rsi)
+     	rmmovq %r9,24(%rsi)
+     	jle Loop3
+     	iaddq $1,%rax
+     Loop3:	
+     	andq %r9,%r9
+     	jle Loop4
+     	iaddq $1,%rax
+     Loop4:
+     	mrmovq 32(%rdi),%r8
+     	mrmovq 40(%rdi),%r9
+     	andq %r8,%r8
+     	rmmovq %r8,32(%rsi)
+     	rmmovq %r9,40(%rsi)
+     	jle Loop5
+     	iaddq $1,%rax
+     Loop5:
+     	iaddq $48,%rdi
+     	iaddq $48,%rsi		
+     	andq %r9,%r9
+     	jle test
+     	iaddq $1,%rax
+     test:
+     	iaddq $-6, %rdx			# 先减，判断够不够6个
+     	jge Loop				# 6路展开
+     	iaddq $6, %rdx
+     	jmp test2				#剩下的
+     
+     L:
+     	mrmovq (%rdi),%r8
+     	andq %r8,%r8
+     	rmmovq %r8,(%rsi)
+     	jle L1
+     	iaddq $1,%rax
+     L1:
+     	mrmovq 8(%rdi),%r8
+     	andq %r8,%r8
+     	rmmovq %r8,8(%rsi)
+     	jle L2
+     	iaddq $1,%rax
+     L2:
+     	mrmovq 16(%rdi),%r8
+     	iaddq $24,%rdi
+     	rmmovq %r8,16(%rsi)
+     	iaddq $24,%rsi
+     	andq %r8,%r8
+     	jle test2
+     	iaddq $1,%rax
+     test2:
+     	iaddq $-3, %rdx			# 先减，判断够不够3个
+     	jge L
+     	iaddq $2, %rdx			# -1则不剩了，直接Done,0 剩一个, 1剩2个
+         je R0
+         jl Done
+     	mrmovq (%rdi),%r8
+     	mrmovq 8(%rdi),%r9
+     	rmmovq %r8,(%rsi)
+     	rmmovq %r9,8(%rsi)
+     	andq %r8,%r8
+     	jle R2
+     	iaddq $1,%rax
+     R2:
+     	andq %r9,%r9
+     	jle Done
+     	iaddq $1,%rax
+     	jmp Done
+     R0:
+     	mrmovq (%rdi),%r8
+     	andq %r8,%r8
+     	rmmovq %r8,(%rsi)
+     	jle Done
+     	iaddq $1,%rax
+     ```
+  
+     结果：
+  
+     ```bash
+     54      360     6.67
+     55      362     6.58
+     56      374     6.68
+     57      381     6.68
+     58      386     6.66
+     59      394     6.68
+     60      397     6.62
+     61      399     6.54
+     62      410     6.61
+     63      418     6.63
+     64      423     6.61
+     Average CPE     8.17
+     Score   46.7/60.0
+     ```
+  
+     最终得分46.7，完结archlab，总共花费时间20h
