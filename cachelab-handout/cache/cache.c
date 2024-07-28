@@ -3,7 +3,12 @@
 #include <string.h>
 #include "cache.h"
 
-//Initializes the cache with the specified number of sets, lines per set, and block size
+/*
+	Initializes the cache with the specified number of sets, lines per set, and block size.
+	(S)num_set: Number of sets.
+	(E)num_lines_per_set: Number of lines per set.
+	(B)block_size: Block size(bytes)
+*/
 void init_cache(Cache *cache, int num_sets, int num_lines_per_set, int block_size){
 
 	//initialize the parameters of cache
@@ -26,6 +31,70 @@ void init_cache(Cache *cache, int num_sets, int num_lines_per_set, int block_siz
 		}
 	}
 }
+
+/*
+	Determine if a copy of the word w is stored in one of the cache lines contained in set i
+	A copy of w is contained in the line if and only if the valid bit is set and
+	the tag in the cache line matches the tag in the address of w.
+*/
+CacheLine* find_cache_line(Cache *cache, int set_index, int tag){
+
+	// Set selection
+	CacheSet target_set = cache->sets[set_index];
+
+	// Line mactching
+	for (int i = 0; i < target_set.line_nums; i++){
+		if(target_set.lines[i].valid && target_set.lines[i].tag == tag){
+			return target_set.lines[i];
+		}
+	}
+	return NULL;
+}
+	
+/*
+	Read data from the cache block at a specific byte offset.
+	size_t offset: The first byte in the desired word.
+	In the example, the block offset bits of (0b100) indicate that the copy of w starts at byte 4 in the block.
+*/
+char* access_cache_word(CacheLine *line, size_t offset){
+	if (line->valid) {
+		return (line->block + offset)
+	}
+	return NULL;
+}
+
+/*
+	Insert the new block in one of the cache lines of the set indicated by the set index bits.
+*/
+void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock block){
+	//Set selection
+	CacheSet target_set = cache->sets[set_index];
+	int index_of_target_line = 0;
+
+	for (int i = 0; i < target_set.line_nums; i++){
+		if (!target_set.lines[i].valid) {
+			index_of_target_line = i;
+			break;
+		}
+		
+		//TODO:maybe exit two equal tags in a set
+		if (target_set.lines[i].valid && target_set.lines[i].tag == tag){
+			index_of_target_line = i;
+			break;
+		}
+
+		//Update cache line with new block
+		target_set.lines[index_of_target_line].valid = 1;
+		target_set.lines[index_of_target_line].tag = tag;
+		copy_block(target_set.lines[index_of_target_line].block, block);
+	}
+
+
+	void copy_block(CacheBlock dest_block, CacheBlock src_block, int block_size){
+		memcpy(dest_block.data, src_block.data, block_size);
+	}
+
+
 
 
 
