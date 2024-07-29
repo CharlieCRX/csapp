@@ -28,6 +28,7 @@ void init_cache(Cache *cache, int num_sets, int num_lines_per_set, int block_siz
 			cache->sets[i].lines[j].valid = 0;				// Initialize valid bit to 0
 			cache->sets[i].lines[j].tag = 0;					// Initialize tag to 0
 			cache->sets[i].lines[j].block.data = (char *)malloc(block_size * sizeof(char));
+			cache->sets[i].lines[j].block.data_size = block_size;
 		}
 	}
 }
@@ -63,6 +64,16 @@ char* access_cache_word(CacheLine *line, size_t offset){
 	return NULL;
 }
 
+//Copy memory block to cache block
+void copy_block(CacheBlock memory_block, CacheBlock cache_block){
+	if(memory_block.data_size == cache_block.data_size){
+		int block_size = cache_block.data_size;
+		memcpy(dest_block.data, src_block.data, block_size);
+	}
+}
+
+
+
 /*
 	Insert the new block in one of the cache lines of the set indicated by the set index bits.
 */
@@ -90,11 +101,14 @@ void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock block){
 	}
 
 
-	void copy_block(CacheBlock dest_block, CacheBlock src_block, int block_size){
-		memcpy(dest_block.data, src_block.data, block_size);
+
+//Free all allocated memory for the cache
+void free_cache(Cache *cache){
+	for (int i = 0; i < cache->num_sets; i++){
+		for (j = 0; j < cache->num_lines_per_set; j++){
+			free(cache->sets[i].lines[j].block.data); // Free data memory
+		}
+		free(cache->sets[i].lines);									// Free array of cache lines
 	}
-
-
-
-
-
+	free(cache->sets);														// Free array of cache sets
+}

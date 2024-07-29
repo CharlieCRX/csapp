@@ -3,6 +3,7 @@
 //Structure to represent a cache block which contains a pointer to data
 typedef struct {
 	char *data;
+	int data_size;
 }CacheBlock;
 
 
