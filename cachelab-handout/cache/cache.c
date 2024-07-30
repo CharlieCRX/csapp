@@ -46,7 +46,7 @@ CacheLine* find_cache_line(Cache *cache, int set_index, int tag){
 	// Line mactching
 	for (int i = 0; i < target_set.line_nums; i++){
 		if(target_set.lines[i].valid && target_set.lines[i].tag == tag){
-			return target_set.lines[i];
+			return (target_set.lines + i);
 		}
 	}
 	return NULL;
@@ -59,16 +59,17 @@ CacheLine* find_cache_line(Cache *cache, int set_index, int tag){
 */
 char* access_cache_word(CacheLine *line, size_t offset){
 	if (line->valid) {
-		return (line->block + offset)
+		return (line->block.data + offset);
 	}
 	return NULL;
 }
 
 //Copy memory block to cache block
+//TODO:Swap the order of two parameters
 void copy_block(CacheBlock memory_block, CacheBlock cache_block){
 	if(memory_block.data_size == cache_block.data_size){
 		int block_size = cache_block.data_size;
-		memcpy(dest_block.data, src_block.data, block_size);
+		memcpy(cache_block.data, memory_block.data, block_size);
 	}
 }
 
@@ -77,7 +78,7 @@ void copy_block(CacheBlock memory_block, CacheBlock cache_block){
 /*
 	Insert the new block in one of the cache lines of the set indicated by the set index bits.
 */
-void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock block){
+void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block){
 	//Set selection
 	CacheSet target_set = cache->sets[set_index];
 	int index_of_target_line = 0;
@@ -94,18 +95,17 @@ void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock block){
 			break;
 		}
 
+	}
 		//Update cache line with new block
 		target_set.lines[index_of_target_line].valid = 1;
 		target_set.lines[index_of_target_line].tag = tag;
-		copy_block(target_set.lines[index_of_target_line].block, block);
-	}
-
-
+		copy_block(memory_block, target_set.lines[index_of_target_line].block);
+}
 
 //Free all allocated memory for the cache
 void free_cache(Cache *cache){
 	for (int i = 0; i < cache->num_sets; i++){
-		for (j = 0; j < cache->num_lines_per_set; j++){
+		for (int j = 0; j < cache->num_lines_per_set; j++){
 			free(cache->sets[i].lines[j].block.data); // Free data memory
 		}
 		free(cache->sets[i].lines);									// Free array of cache lines
