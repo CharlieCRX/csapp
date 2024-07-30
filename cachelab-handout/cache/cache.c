@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cache.h"
+#include <limits.h>
 
 /*
 	Initializes the cache with the specified number of sets, lines per set, and block size.
@@ -22,6 +23,7 @@ void init_cache(Cache *cache, int num_sets, int num_lines_per_set, int block_siz
 
 		cache->sets[i].line_nums = num_lines_per_set;
 		cache->sets[i].lines = (CacheLine *) malloc(num_lines_per_set * sizeof(CacheLine));
+		cache->sets[i].time = 0; //LRU time
 
 		//organize the cache line
 		for(int j = 0; j < num_lines_per_set; j++){
@@ -46,6 +48,7 @@ CacheLine* find_cache_line(Cache *cache, int set_index, int tag){
 	// Line mactching
 	for (int i = 0; i < target_set.line_nums; i++){
 		if(target_set.lines[i].valid && target_set.lines[i].tag == tag){
+			target_set.lines[i].last_access_time = ++target_set.time; //Update access time
 			return (target_set.lines + i);
 		}
 	}
@@ -81,25 +84,30 @@ void copy_block(CacheBlock memory_block, CacheBlock cache_block){
 void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block){
 	//Set selection
 	CacheSet target_set = cache->sets[set_index];
-	int index_of_target_line = 0;
+	unsigned long min_time = ULONG_MAX;
+	int lru_index = 0;	//Index of the least recently used cache line
 
 	for (int i = 0; i < target_set.line_nums; i++){
+		// If a cache line is invalid, choose it for replacement
 		if (!target_set.lines[i].valid) {
-			index_of_target_line = i;
+			lru_index = i;
 			break;
 		}
-		
-		//TODO:maybe exit two equal tags in a set
-		if (target_set.lines[i].valid && target_set.lines[i].tag == tag){
-			index_of_target_line = i;
+	
+		// Otherwise, find the cache line with the samllest last access time
+		if (target_set.lines[i].last_access_time < min_time){
+			min_time = target_set.lines[i].last_access_time;
+			lru_index = i;
 			break;
 		}
 
 	}
-		//Update cache line with new block
-		target_set.lines[index_of_target_line].valid = 1;
-		target_set.lines[index_of_target_line].tag = tag;
-		copy_block(memory_block, target_set.lines[index_of_target_line].block);
+		// Replace the LRU cache line with the new memory block
+		CacheLine *line = &target_set.lines[lru_index];
+		line->valid = 1;
+		line->tag = tag;
+		copy_block(memory_block, line->block);
+		line->last_access_time = ++target_set.time;
 }
 
 //Free all allocated memory for the cache

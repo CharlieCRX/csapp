@@ -12,12 +12,14 @@ typedef struct {
 	int valid;
 	int tag;
 	CacheBlock block;
+	unsigned long last_access_time; // Time of last access for LRU
 }CacheLine;
 
 //Structure to represent a cache set
 typedef struct {
 	CacheLine *lines;		// Array of cache lines in this set
 	int line_nums;			// Number of cache lines in the set
+	unsigned long time; // Time counter for LRU
 }CacheSet;
 
 //Structure to represent the entire cache
