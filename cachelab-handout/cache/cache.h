@@ -1,4 +1,19 @@
 #include <stddef.h>
+// Enumeration for memory operation types
+typedef enum {
+	LOAD,
+	STORE,
+	MODIFY,
+	UNKNOWN
+}OperationType;
+
+// Structure for memeory operation
+typedef struct {
+	unsigned int address; //Memory address
+	char operation; //Operation type
+	size_t data_size;	//Data size
+} MemoryOperation;
+
 // Structure to store cache statistics
 typedef struct {
 	int hits;

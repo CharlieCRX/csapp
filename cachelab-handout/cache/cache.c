@@ -132,6 +132,9 @@ void free_cache(Cache *cache){
 	free(cache->sets);														// Free array of cache sets
 }
 
+
+/*---------------------- Memory operation part -------------------------------------------*/
+
 // Convert memory address to cache parameters
 AddressPartition get_address_partition(Cache *cache, int address) {
 	AddressPartition cache_params;
@@ -140,6 +143,20 @@ AddressPartition get_address_partition(Cache *cache, int address) {
 	cache_params.offset = address % cache->block_size;
 	return cache_params;
 }
+
+// Get the operation type
+OperationType get_operation_type(const char operation_char) {
+	if (operation_char == 'L') {
+		return LOAD;
+	} else if (operation_char == 'S') {
+		return STORE;
+	} else if (operation_char == 'M') {
+		return MODIFY;
+	} else {
+		return UNKNOWN;
+	}
+}
+
 // Function to handle a cache hit
 void process_cache_hit(Cache *cache, CacheLine *line, char operation, int offset, int size) {
 	if (operation == 'M' || operation == 'S') {
@@ -186,6 +203,15 @@ void handle_memory_operation(Cache *cache, char operation, int address, int size
 			process_cache_hit(cache, line, operation, cache_params.offset, current_block_size);
 		} else {
 			process_cache_miss(cache, operation, cache_params);
-		}
 	}
 }
+
+// Get operations from tracefile
+MemoryOperation * convert_tracefile_to_memory_operation(const char *filename) {
+	FILE *file = fopen(filename, "r");
+	if (file == NULL) {
+		perror("Error opening file");
+		return NULL;
+	}
+
+
