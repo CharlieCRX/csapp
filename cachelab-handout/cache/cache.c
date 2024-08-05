@@ -4,6 +4,20 @@
 #include "cache.h"
 #include <limits.h>
 
+void print_help() {
+	printf("** A Cache Simulator by Deconx\n");
+	printf("Usage: ./csim-ref [-hv] -s <num> -E <num> -b <num> -t <file>\n");
+	printf("Options:\n");
+	printf("-h         Print this help message.\n");
+	printf("-v         Optional verbose flag.\n");
+	printf("-s <num>   Number of set index bits.\n");
+	printf("-E <num>   Number of lines per set.\n");
+	printf("-b <num>   Number of block offset bits.\n");
+	printf("-t <file>  Trace file.\n\n\n");
+	printf("Examples:\n");
+	printf("linux>  ./csim -s 4 -E 1 -b 4 -t traces/yi.trace\n");
+	printf("linux>  ./csim -v -s 8 -E 2 -b 4 -t traces/yi.trace\n");
+}
 /*
 	Initializes the cache with the specified number of sets, lines per set, and block size.
 	(S)num_sets: Number of sets.
@@ -88,7 +102,7 @@ void copy_block(CacheBlock memory_block, CacheBlock cache_block){
 /*
 	Insert the new block in one of the cache lines of the set indicated by the set index bits.
 */
-void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block){
+void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block, int verbose){
 	//Set selection
 	CacheSet target_set = cache->sets[set_index];
 	unsigned long min_time = ULONG_MAX;
@@ -110,6 +124,9 @@ void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_b
 	}
 		// Cache evictions:If the selected line is valid, we are evicting it.
 		if (target_set.lines[lru_index].valid) {
+			if (verbose) {
+				printf("eviction ");
+			}
 			cache->cache_log.evictions++;
 		}
 
@@ -117,7 +134,7 @@ void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_b
 		CacheLine *line = &target_set.lines[lru_index];
 		line->valid = 1;
 		line->tag = tag;
-		copy_block(memory_block, line->block);
+		//copy_block(memory_block, line->block);
 		line->last_access_time = ++target_set.time;
 }
 
@@ -136,7 +153,7 @@ void free_cache(Cache *cache){
 /*---------------------- Memory operation part -------------------------------------------*/
 
 // Convert memory address to cache parameters
-AddressPartition get_address_partition(Cache *cache, int address) {
+AddressPartition get_address_partition(Cache *cache, size_t address) {
 	AddressPartition cache_params;
 	cache_params.index = (address / cache->block_size) % cache->num_sets;
 	cache_params.tag = address / (cache->block_size * cache->num_sets);
@@ -157,61 +174,191 @@ OperationType get_operation_type(const char operation_char) {
 	}
 }
 
-// Function to handle a cache hit
-void process_cache_hit(Cache *cache, CacheLine *line, char operation, int offset, int size) {
-	if (operation == 'M' || operation == 'S') {
-		// Write back to cache
-		char *data = access_cache_word(line, offset);
-		memset(data, 0, size);	// Example modification
-	}
-}
-
-// Function to handle a cache miss
-void process_cache_miss(Cache *cache, char operation, AddressPartition cache_params) {
-	CacheBlock memory_block;
-	memory_block.data_size = cache->block_size;
-	memory_block.data = (char *) malloc(cache->block_size * sizeof(char));
-
-	// Simulate reading from memory (e.g., initialize with zeros)
-	memset(memory_block.data, 0, cache->block_size);
-	insert_cache_line(cache, cache_params.index, cache_params.tag, memory_block);
-	free(memory_block.data);
-	if (operation == 'M') {
-		CacheLine *line = find_cache_line(cache, cache_params.index, cache_params.tag);
-	}
-
-}
-
-
-void print_cache_params(AddressPartition cache_params) {
-	printf("index = %d, tag = %d, offset = %d\n", cache_params.index, cache_params.tag, cache_params.offset);
-}
-// Function to handle memory operation
-void handle_memory_operation(Cache *cache, char operation, int address, int size)	{
+/*
+	Assume that memory accesses are aligned properly, such that a single
+	memory access never crosses block boundaries.
+*/
+void handle_memory_operation_without_size(Cache *cache, MemoryOperation operation, int verbose) {
 	int block_size = cache->block_size;
+	AddressPartition cache_params = get_address_partition(cache, operation.address);
+	
+	// Check if the block is in the cache
+	CacheLine *line = find_cache_line(cache, cache_params.index, cache_params.tag);
 
-	// Loop over all blocks in the data to be accessed
-	for (int i = 0; i < size; i += block_size) {
-		int current_block_size = (size - i < block_size) ? (size - 1) : block_size;
-		int current_address = address + i;
+	// Assume the memory block is aligned properly
+	CacheBlock memory_block;
+	memory_block.data_size = block_size;
+	memory_block.data = (char *) malloc(block_size * sizeof(char));
 
-		AddressPartition cache_params = get_address_partition(cache, current_address);
+	if (line && verbose) {
+		printf("hit ");
+	} else {
+		if (verbose) printf("miss ");
+		// Miss: first insert the block to cache
+		insert_cache_line(cache, cache_params.index, cache_params.tag, memory_block, verbose);
+	}
 
-		// Check if the block is in the cache
-		CacheLine *line = find_cache_line(cache, cache_params.index, cache_params.tag);
-		if (line) {
-			process_cache_hit(cache, line, operation, cache_params.offset, current_block_size);
-		} else {
-			process_cache_miss(cache, operation, cache_params);
+	if (operation.instruction == 'M') {
+		CacheLine *line_twice = find_cache_line(cache, cache_params.index, cache_params.tag);
+		if (line_twice && verbose) printf("hit ");
 	}
 }
 
-// Get operations from tracefile
-MemoryOperation * convert_tracefile_to_memory_operation(const char *filename) {
+int find_specific_tag_line(CacheSet *set, int tag) {
+	CacheLine *lines = set->lines;
+	int line_nums = set->line_nums;
+	for (int i = 0; i < line_nums; i++) {
+		if(lines[i].valid && lines[i].tag == tag) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+
+int find_empty_line(CacheSet *set){
+	CacheLine *lines = set->lines;
+	int line_nums = set->line_nums;
+	for (int i = 0; i < line_nums; i++) {
+		if(!lines[i].valid) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int find_eviction_line(CacheSet *set) {
+	CacheLine *lines = set->lines;
+	int line_nums = set->line_nums;
+	unsigned long min_time = ULONG_MAX;
+	int lru_index = -1;
+	for (int i = 0; i < line_nums; i++) {
+		if(lines[i].last_access_time < min_time) {
+			min_time = lines[i].last_access_time;
+			lru_index = i;
+		}
+	}
+	return lru_index;
+}
+
+void update_cache_line(Cache *cache, int index, int tag, int verbose) {
+	int line_index = find_empty_line(&cache->sets[index]);
+	if (line_index == -1) {
+		if (verbose) {
+			printf("eviction ");
+		}
+		cache->cache_log.evictions++;
+		line_index = find_eviction_line(&cache->sets[index]);
+	}
+	cache->sets[index].lines[line_index].valid = 1;
+	cache->sets[index].lines[line_index].tag = tag;
+	cache->sets[index].lines[line_index].last_access_time = ++cache->sets[index].time;
+}
+
+void handle_cache_operation(Cache *cache, int index, int tag, int verbose) {
+	int line_index = find_specific_tag_line(&cache->sets[index], tag);
+	// Miss
+	if (line_index == -1) {
+		if(verbose) printf("miss ");
+		// MISS OPt
+		cache->cache_log.misses++;
+		update_cache_line(cache, index, tag, verbose);
+	} else {
+		if (verbose) printf("hit ");
+		cache->cache_log.hits++;
+	}
+}
+	
+
+void handle_memory_operation(Cache *cache, MemoryOperation operation, int verbose) {
+	AddressPartition cache_params = get_address_partition(cache, operation.address);
+	int index = cache_params.index;
+	int tag = cache_params.tag;
+
+	if (operation.instruction == 'M') {
+		handle_cache_operation(cache, index, tag, verbose);
+		handle_cache_operation(cache, index, tag, verbose);
+	} else {
+		handle_cache_operation(cache, index, tag, verbose);
+	}
+}
+
+
+
+/*
+	 Parse a single line of input to extract a memory operation
+	 The input line is expected to be in the format: "OPERATION ADDRESS,SIZE",
+	 where:
+	 - OPERATION is a single character ('L', 'S', or 'M')
+	 - ADDRESS is an unsigned integer represented in hexadecimal format
+	 - SIZE is a size_t value representing the size of the memory operation
+	 Example input line: "L 10,1"
+*/
+int parse_line(const char *line, MemoryOperation *operation) {
+	char verbose;
+	char op;
+	size_t address;
+	size_t size;
+
+	// Use sscanf to parse the line content, expecting the address in hexadecimal format
+	if (sscanf(line, "%c%c %zx,%zu", &verbose, &op, &address, &size) != 4) {
+		return 0;
+	}
+	// Omit I instruction
+	if (verbose == 'I') return 0;
+
+	// Store the parsed data in the provided MemoryOperation structure
+	operation->address = address;
+	operation->instruction = op;
+	operation->data_size = size;
+	return 1;	// Parsing successful
+}
+
+/*
+	 Read a trace file and converts each line to MemoryOperation.
+	 @param filename The name of the trace file to read
+	 @param operations Pointer to a pointer to store the dynamically allocated array of MemoryOperation
+	 @retuen The number of operations read and stored in the array, or -1 if an error occured.
+*/
+int convert_tracefile_to_memory_operation(const char *filename, MemoryOperation **operations) {
 	FILE *file = fopen(filename, "r");
-	if (file == NULL) {
-		perror("Error opening file");
-		return NULL;
+	if (!file) {
+		return -1;
 	}
 
+	// Allocate an inital array to store MemoryOperation
+	size_t capacity = 10;
+	*operations = (MemoryOperation *) malloc (capacity * sizeof(MemoryOperation));
+	if(!*operations) {
+		perror("Memory allocation error");
+		fclose(file);
+		return -1;
+	}
+
+	char line[256];
+	size_t count = 0;
+
+	while (fgets(line, sizeof(line), file)) {
+		if (count >= capacity) {
+			// Resize the array if the capacity is exceeded
+			capacity *= 2;
+			MemoryOperation *temp = (MemoryOperation *)realloc(*operations, capacity * sizeof(MemoryOperation));
+			if (!temp) {
+				perror("Memory reallocation error");
+				free(*operations);
+				fclose(file);
+				return -1;
+			}
+			*operations = temp;
+		}
+		MemoryOperation operation;
+		if (parse_line(line, &operation)) {
+			(*operations)[count++] = operation;
+		}
+	}
+
+	fclose(file);
+	return count;
+}
+				
 

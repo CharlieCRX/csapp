@@ -77,7 +77,7 @@ void test_insert_cache() {
 
 	strcpy(memory_block.data, "imgod!");
 	assert(strcmp(memory_block.data, "imgod!") == 0);
-	insert_cache_line(&cache, 1, 102, memory_block, 1);
+	insert_cache_line(&cache, 1, 102, memory_block);
 
 	assert(cache.sets[1].lines[0].valid == 1);
 	assert(cache.sets[1].lines[0].tag == 102);
@@ -107,7 +107,7 @@ void read_and_write() {
 
 	strcpy(memory_block.data, "imgod!");
 	assert(strcmp(memory_block.data, "imgod!") == 0);
-	insert_cache_line(&cache, 1, 102, memory_block, 1);
+	insert_cache_line(&cache, 1, 102, memory_block);
 	
 	// Find the data from the cache
 	CacheLine *target_line = find_cache_line(&cache, 1, 102);
@@ -165,18 +165,18 @@ void test_insert_cacheline() {
 	strcpy(memory_block.data, "block1");
 
 	// Insert the first cache line
-	insert_cache_line(&cache, 0, 1, memory_block, 1);
+	insert_cache_line(&cache, 0, 1, memory_block);
 
 	// Insert the second cache line
 	strcpy(memory_block.data, "block2");
-	insert_cache_line(&cache, 1, 2, memory_block, 1);
+	insert_cache_line(&cache, 1, 2, memory_block);
 
 	// Insert the third cache line(should cause eviction in the first set)
 	strcpy(memory_block.data, "block3");
-	insert_cache_line(&cache, 0, 3, memory_block, 1);
+	insert_cache_line(&cache, 0, 3, memory_block);
 
 	strcpy(memory_block.data, "block4");
-	insert_cache_line(&cache, 0, 4, memory_block, 1);
+	insert_cache_line(&cache, 0, 4, memory_block);
 	assert(cache.cache_log.evictions == 2);
 	free(memory_block.data);
 	free_cache(&cache);
@@ -194,13 +194,9 @@ void test_parse_line() {
 	} else {
 		printf("Error parsing line!\n");
 	}
+	printf("parse line func is ok!\n");
 }
 
-void print_cache_behavior(int hits, int misses, int evictions) {
-	for(int i = 0; i < hits; i++) {
-		printf("hit ");
-	}
-}
 void test_convert_tracefile_to_opreation() {
 	Cache cache;
 	int num_sets = 4;
@@ -210,22 +206,17 @@ void test_convert_tracefile_to_opreation() {
 	// Initialize the cache
 	init_cache(&cache, num_sets, num_lines_per_set, block_size);
 
-	const char *filename = "/home/crx/study/csapp/cachelab-handout/traces/yi3.trace";
+	const char *filename = "/home/crx/study/csapp/cachelab-handout/traces/trans.trace";
 	MemoryOperation *operations;
 	int num_operations = convert_tracefile_to_memory_operation(filename, &operations);
+	printf("num is %d\n", num_operations);
 
 	if (num_operations > 0) {
 		for (int i = 0; i < num_operations; i++) {
-			//printf("Operation: %c, Address: %lx, Size: %zu\n", operations[i].instruction, operations[i].address, operations[i].data_size);
-			printf("%c %zx,%zu,", operations[i].instruction, operations[i].address, operations[i].data_size);
-			int per_hits = cache.cache_log.hits;
-			int per_misses = cache.cache_log.misses;
-			int per_evictions = cache.cache_log.evictions;
-
-			handle_memory_operation_without_size(&cache, operations[i], 1);
-			printf("\n");
+			printf("Operation: %c, Address: %lx, Size: %zu\n", operations[i].instruction, operations[i].address, operations[i].data_size);
+			//handle_memory_operation(&cache, operations[i].operation, operations[i].address, operations[i].data_size);
+			//printf("Hits: %d, Misses: %d, Evictions: %d\n", cache.cache_log.hits, cache.cache_log.misses, cache.cache_log.evictions);
 		}
-		printf("Hits: %d, Misses: %d, Evictions: %d\n", cache.cache_log.hits, cache.cache_log.misses, cache.cache_log.evictions);
 		free(operations);
 		free_cache(&cache);
 	} else {

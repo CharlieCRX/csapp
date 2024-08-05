@@ -9,8 +9,8 @@ typedef enum {
 
 // Structure for memeory operation
 typedef struct {
-	unsigned int address; //Memory address
-	char operation; //Operation type
+	size_t address; //Memory address
+	char instruction; //Insrtuction type
 	size_t data_size;	//Data size
 } MemoryOperation;
 
@@ -61,11 +61,15 @@ typedef struct {
 
 
 // Function declarations
+void print_help();
 void init_cache(Cache *cache, int num_sets, int num_lines_per_set, int block_size);
 CacheLine* find_cache_line(Cache *cache, int set_index, int tag);
 char* access_cache_word(CacheLine *line, size_t offset);
 void copy_block(CacheBlock memory_block, CacheBlock cache_block);
-void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block);
+void insert_cache_line(Cache *cache, int set_index, int tag, CacheBlock memory_block, int verbose);
 void free_cache(Cache *cache);
-AddressPartition get_address_partition(Cache *cache, int address);
-void handle_memory_operation(Cache *cache, char operation, int address, int size);
+AddressPartition get_address_partition(Cache *cache, size_t address);
+void handle_memory_operation(Cache *cache, MemoryOperation operation, int verbose); 
+void handle_memory_operation_without_size(Cache *cache, MemoryOperation operation, int verbose);
+int parse_line(const char *line, MemoryOperation *operation);
+int convert_tracefile_to_memory_operation(const char *filename, MemoryOperation **operations);

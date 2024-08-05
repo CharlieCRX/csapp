@@ -1,0 +1,23 @@
+cache.c: In function ‘process_cache_hit’:
+cache.c:163:9: error: expected declaration specifiers before ‘if’
+  163 |         if (operation == 'M' || operation == 'S') {
+      |         ^~
+cache.c:168:1: error: expected declaration specifiers before ‘}’ token
+  168 | }
+      | ^
+cache.c:171:86: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘{’ token
+  171 | void process_cache_miss(Cache *cache, char operation, AddressPartition cache_params) {
+      |                                                                                      ^
+cache.c:187:56: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘{’ token
+  187 | void print_cache_params(AddressPartition cache_params) {
+      |                                                        ^
+cache.c:191:73: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘{’ token
+  191 | void handle_memory_operation(Cache *cache, MemoryOperation operation)   {
+      |                                                                         ^
+cache.c:221:62: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘{’ token
+  221 | int parse_line(const char *line, MemoryOperation *operation) {
+      |                                                              ^
+cache.c:247:95: error: expected ‘=’, ‘,’, ‘;’, ‘asm’ or ‘__attribute__’ before ‘{’ token
+  247 | int convert_tracefile_to_memory_operation(const char *filename, MemoryOperation **operations) {
+      |                                                                                               ^
+cache.c:288: error: expected ‘{’ at end of input
