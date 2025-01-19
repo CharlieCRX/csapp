@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <bits/types/sigset_t.h>
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -24,7 +25,7 @@
 #define FG 1    /* running in foreground */
 #define BG 2    /* running in background */
 #define ST 3    /* stopped */
-
+#define TODO() do{printf("not implemented!\n"); exit(0);} while(0);
 /* 
  * Jobs states: FG (foreground), BG (background), ST (stopped)
  * Job state transitions and enabling actions:
@@ -165,6 +166,50 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char buf[MAXLINE];
+    char *argv[MAXARGS];
+    strcpy(buf, cmdline);
+
+    // 解析命令，并且忽略无参数命令
+    int bg = parseline(buf, argv);
+    if (argv[0] == NULL) {
+        return;
+    }
+    // 信号初始化
+    int pid;
+    sigset_t mask_one,prev_one, mask_all;
+    sigemptyset(&mask_one);
+    sigaddset(&mask_one, SIGCHLD);
+    sigfillset(&mask_all);
+
+    // 外部命令处理
+    if (!builtin_cmd(argv)) {
+        // 创建子进程，运行并加载新程序
+        sigprocmask(SIG_BLOCK, &mask_one, &prev_one);
+        if ((pid = fork()) == 0) {
+            setpgid(0, 0);
+            sigprocmask(SIG_SETMASK, &prev_one, NULL); //解除子进程的信号阻塞
+            if (execve(argv[0], argv, environ) < 0) {
+                printf("%s: Command not found\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        // job 控制
+        sigprocmask(SIG_BLOCK, &mask_all, NULL);  // 阻塞所有信号
+        addjob(jobs, pid, (bg ? BG : FG), cmdline);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL);
+
+        if(bg) {
+            printf("[%d] (%d) %s",pid2jid(pid), pid, cmdline);
+        }
+        else {
+            waitfg(pid);
+        }
+        
+    }
+
+
     return;
 }
 
@@ -231,7 +276,19 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
-    return 0;     /* not a builtin command */
+    if (strcmp(argv[0], "jobs") == 0) {
+        listjobs(jobs);
+        return 1;
+    } else if (strcmp(argv[0], "fg") == 0) {
+        TODO();
+        return 1;
+    } else if (strcmp(argv[0], "bg") == 0) {
+        TODO();
+        return 1;
+    } else if (strcmp(argv[0], "quit") == 0) {
+        exit(0);
+    }
+    return 0;
 }
 
 /* 
@@ -247,6 +304,19 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    sigset_t mask, prev;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    // 确保父进程在等待前台作业完成时，不会被非前台子进程的退出信号打断
+    sigprocmask(SIG_BLOCK, &mask, &prev);
+    while(fgpid(jobs) != 0) {
+        sigsuspend(&prev);
+    }
+
+    if (verbose) {
+        printf("waitfg: Process (%d) no longer the fg process\n", pid);
+    }
+    sigprocmask(SIG_SETMASK, &prev, NULL);
     return;
 }
 
@@ -263,6 +333,32 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int olderrno = errno;
+    if (verbose) {
+        printf("sigchld_handler: entering\n");
+    }
+    
+    sigset_t mask_all, prev_all;
+    sigfillset(&mask_all);
+    int pid, statusp;
+    while ((pid = waitpid(-1, &statusp, WNOHANG | WUNTRACED)) > 0)
+    {
+        if (WIFEXITED(statusp)) {
+            struct job_t *pjob =  getjobpid(jobs, pid);
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            int delete_flag = deletejob(jobs, pjob->pid);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        } else {
+            printf("WIFEXITED error!\n");
+            TODO();
+        }
+
+    }
+    
+    errno = olderrno;
+    if (verbose) {
+        printf("sigchld_handler: exiting\n");
+    }
     return;
 }
 
@@ -273,6 +369,31 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    int olderrno = errno;
+
+    if (verbose) {
+        printf("sigint_handler: entering\n");
+    }
+    sigset_t mask_all, prev_all;
+    sigfillset(&mask_all);
+    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+    pid_t fg_pid = fgpid(jobs);
+    if (fg_pid == 0) {
+        errno = olderrno;
+        sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        return;
+    }
+    
+    kill(-fg_pid, SIGINT);
+    sigprocmask(SIG_SETMASK, &prev_all, NULL);
+    if (verbose) {
+        printf("sigint_handler: Job (%d) killed\n", fg_pid);
+    }
+
+    errno = olderrno;
+    if (verbose) {
+        printf("sigint_handler: exiting\n");
+    }
     return;
 }
 
@@ -284,6 +405,10 @@ void sigint_handler(int sig)
 void sigtstp_handler(int sig) 
 {
     return;
+}
+
+void sigquit_handler(int sig) {
+    exit(0);// todo
 }
 
 /*********************
@@ -357,6 +482,9 @@ int deletejob(struct job_t *jobs, pid_t pid)
 
     for (i = 0; i < MAXJOBS; i++) {
 	if (jobs[i].pid == pid) {
+        if (verbose) {
+            printf("sigchld_handler: Job [%d] (%d) deleted\n", jobs[i].jid, jobs[i].pid);
+        }
 	    clearjob(&jobs[i]);
 	    nextjid = maxjid(jobs)+1;
 	    return 1;
@@ -493,16 +621,6 @@ handler_t *Signal(int signum, handler_t *handler)
     if (sigaction(signum, &action, &old_action) < 0)
 	unix_error("Signal error");
     return (old_action.sa_handler);
-}
-
-/*
- * sigquit_handler - The driver program can gracefully terminate the
- *    child shell by sending it a SIGQUIT signal.
- */
-void sigquit_handler(int sig) 
-{
-    printf("Terminating after receipt of SIGQUIT signal\n");
-    exit(1);
 }
 
 
