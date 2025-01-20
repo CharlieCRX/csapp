@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <bits/types/sigset_t.h>
+#include <bits/sigaction.h>
 
 /* Misc manifest constants */
 #define MAXLINE    1024   /* max line size */
@@ -79,6 +80,7 @@ struct job_t *getjobpid(struct job_t *jobs, pid_t pid);
 struct job_t *getjobjid(struct job_t *jobs, int jid); 
 int pid2jid(pid_t pid); 
 void listjobs(struct job_t *jobs);
+void changeJobStatus(struct job_t *jobs, pid_t pid, int new_status);
 
 void usage(void);
 void unix_error(char *msg);
@@ -280,10 +282,10 @@ int builtin_cmd(char **argv)
         listjobs(jobs);
         return 1;
     } else if (strcmp(argv[0], "fg") == 0) {
-        TODO();
+        do_bgfg(argv);
         return 1;
     } else if (strcmp(argv[0], "bg") == 0) {
-        TODO();
+        do_bgfg(argv);
         return 1;
     } else if (strcmp(argv[0], "quit") == 0) {
         exit(0);
@@ -296,6 +298,77 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    struct job_t *pjob;
+    // 将任务运行(SIGCONT)在后台
+    if (strcmp(argv[0], "bg") == 0) {
+        if (argv[1] == NULL) {
+            printf("bg command requires PID or %%jobid argument\n");
+            return;
+        }
+        // 获取此任务信息
+        if (argv[1][0] == '%') {
+            char dest[10];
+            strcpy(dest, argv[1] + 1);
+            int jid = atoi(dest);
+            pjob = getjobjid(jobs, jid);
+        } else {
+            // pid 处理
+            char dest[10];
+            strcpy(dest, argv[1]);
+            int pid = atoi(dest);
+            pjob = getjobpid(jobs, pid);
+        }
+
+        if (pjob == NULL) {
+            printf("(%s): No such process\n", argv[1]);
+            return;
+        }
+
+        // 修改任务状态
+        sigset_t mask, prev;
+        sigfillset(&mask);
+        sigprocmask(SIG_BLOCK, &mask, &prev);
+        kill(-pjob->pid, SIGCONT);
+        changeJobStatus(jobs, pjob->pid, BG);
+        printf("[%d] (%d) %s", pjob->jid, pjob->pid, pjob->cmdline);
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+    }
+    // 将任务运行在前台
+    else {
+        if (argv[1] == NULL) {
+            printf("fg command requires PID or %%jobid argument\n");
+            return;
+        }
+        // 获取此任务信息
+        if (argv[1][0] == '%') {
+            char dest[10];
+            strcpy(dest, argv[1] + 1);
+            int jid = atoi(dest);
+            pjob = getjobjid(jobs, jid);
+        } else {
+            // pid 处理
+            char dest[10];
+            strcpy(dest, argv[1]);
+            int pid = atoi(dest);
+            pjob = getjobpid(jobs, pid);
+        }
+
+        if (pjob == NULL) {
+            printf("(%s): No such process\n", argv[1]);
+            return;
+        }
+
+        // 修改任务状态
+        sigset_t mask, prev;
+        sigfillset(&mask);
+        sigprocmask(SIG_BLOCK, &mask, &prev);
+        kill(-pjob->pid, SIGCONT);
+        changeJobStatus(jobs, pjob->pid, FG);
+        sigprocmask(SIG_SETMASK, &prev, NULL);
+
+        // 显式地等待前台任务
+        waitfg(pjob->pid);
+    }
     return;
 }
 
@@ -343,14 +416,25 @@ void sigchld_handler(int sig)
     int pid, statusp;
     while ((pid = waitpid(-1, &statusp, WNOHANG | WUNTRACED)) > 0)
     {
+        // 删除此终止或暂停的子进程
+        struct job_t *pjob =  getjobpid(jobs, pid);
+        int jid = pjob->jid;
+
         if (WIFEXITED(statusp)) {
-            struct job_t *pjob =  getjobpid(jobs, pid);
             sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
-            int delete_flag = deletejob(jobs, pjob->pid);
+            deletejob(jobs, pjob->pid);
             sigprocmask(SIG_SETMASK, &prev_all, NULL);
-        } else {
-            printf("WIFEXITED error!\n");
-            TODO();
+        } else if (WIFSIGNALED(statusp)){   // 信号终止
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            deletejob(jobs, pjob->pid);
+            printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(statusp));
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        } else if (WIFSTOPPED(statusp)){
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+            // 修改此子进程的作业为停止状态
+            changeJobStatus(jobs, pid, ST);
+            printf("Job [%d] (%d) stopped by signal %d\n", jid, pid, WSTOPSIG(statusp));
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
         }
 
     }
@@ -377,6 +461,7 @@ void sigint_handler(int sig)
     sigset_t mask_all, prev_all;
     sigfillset(&mask_all);
     sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+    // 只处理前台作业
     pid_t fg_pid = fgpid(jobs);
     if (fg_pid == 0) {
         errno = olderrno;
@@ -387,7 +472,7 @@ void sigint_handler(int sig)
     kill(-fg_pid, SIGINT);
     sigprocmask(SIG_SETMASK, &prev_all, NULL);
     if (verbose) {
-        printf("sigint_handler: Job (%d) killed\n", fg_pid);
+        printf("sigint_handler:Job [%d] (%d) killed\n", pid2jid(fg_pid), fg_pid);
     }
 
     errno = olderrno;
@@ -404,6 +489,31 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    int olderrno = errno;
+    if (verbose) {
+        printf("sigtstp_handler: entering\n");
+    }
+
+    sigset_t mask_all, prev_all;
+    sigfillset(&mask_all);
+    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+    // 只处理前台作业
+    pid_t fg_pid = fgpid(jobs);
+    if (fg_pid == 0) {
+        errno = olderrno;
+        sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        return;
+    }
+    kill(-fg_pid, SIGTSTP);
+    if (verbose) {
+        printf("sigtstp_handler: Job [%d] (%d) stopped\n", pid2jid(fg_pid), fg_pid);
+    }
+    errno = olderrno;
+    if (verbose) {
+        printf("sigtstp_handler: exiting\n");
+    }
+    
+    sigprocmask(SIG_SETMASK, &prev_all, NULL);
     return;
 }
 
@@ -463,7 +573,7 @@ int addjob(struct job_t *jobs, pid_t pid, int state, char *cmdline)
 		nextjid = 1;
 	    strcpy(jobs[i].cmdline, cmdline);
   	    if(verbose){
-	        printf("Added job [%d] %d %s\n", jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
+	        printf("Added job [%d] (%d) %s\n", jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
             }
             return 1;
 	}
@@ -567,6 +677,17 @@ void listjobs(struct job_t *jobs)
 	    printf("%s", jobs[i].cmdline);
 	}
     }
+}
+
+/* changeJobStatus - 修改特定pid作业的状态 */
+void changeJobStatus(struct job_t *jobs, pid_t pid, int new_status) {
+    struct job_t *pjob = getjobpid(jobs, pid);
+    if (pjob == NULL) {
+        printf("Job is NULL!\n");
+        exit(0);
+    }
+
+    pjob->state = new_status;
 }
 /******************************
  * end job list helper routines
